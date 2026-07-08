@@ -1,0 +1,42 @@
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Publish immorterm-mcp-gateway
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm Trusted Publishing (provenance)
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Bump patch version
+        run: |
+          CURRENT=$(npm view immorterm-mcp-gateway version 2>/dev/null || jq -r .version package.json)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+          echo "Bumping immorterm-mcp-gateway $CURRENT -> $NEW_VERSION"
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > /tmp/pkg.json
+          mv /tmp/pkg.json package.json
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Publish to npm (Trusted Publishing)
+        run: npx -y npm@latest publish --provenance --access public

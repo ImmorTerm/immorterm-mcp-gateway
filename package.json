@@ -1,0 +1,49 @@
+{
+	"name": "immorterm-mcp-gateway",
+	"version": "0.1.0",
+	"description": "Singleton MCP gateway \u2014 run all stdio MCP servers as shared processes, expose via Streamable HTTP",
+	"main": "dist/index.js",
+	"bin": {
+		"immorterm-mcp-gateway": "dist/index.js"
+	},
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"start": "node dist/index.js start",
+		"clean": "rm -rf dist",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:run": "vitest run"
+	},
+	"keywords": [
+		"mcp",
+		"gateway",
+		"model-context-protocol",
+		"claude",
+		"stdio",
+		"proxy"
+	],
+	"author": "Shai Snir <shaisnir@gmail.com>",
+	"license": "FSL-1.1-Apache-2.0",
+	"dependencies": {
+		"hono": "^4.7.0",
+		"@hono/node-server": "^1.14.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"typescript": "^5.7.0",
+		"vitest": "^3.0.0"
+	},
+	"engines": {
+		"node": ">=18.0.0"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ImmorTerm/immorterm-mcp-gateway.git"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE.md"
+	]
+}
