@@ -6,3 +6,4 @@ dist/
 # package-lock.json is required for `npm ci` in CI — force-track it
 # (a global ~/.gitignore_global may ignore it).
 !package-lock.json
+.immorterm/
