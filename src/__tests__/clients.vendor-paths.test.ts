@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { homedir } from 'os';
 import * as path from 'path';
-import { getDefaultConfigPath } from '../clients';
+import { getDefaultConfigPath, usesJsonConfig } from '../clients';
 
 const HOME = homedir();
 
@@ -35,4 +35,21 @@ describe('getDefaultConfigPath \u2014 vendor MCP config paths', () => {
     expect(result).toContain('saoudrizwan.claude-dev');
     expect(result).toMatch(/cline_mcp_settings\.json$/);
   });
+});
+
+describe('usesJsonConfig \u2014 which client configs the gateway may rewrite', () => {
+  it('excludes Codex, whose config is TOML', () => {
+    // readConfig() swallows a parse failure and returns {}. Treating Codex's
+    // TOML as JSON therefore yields an empty config, and any path that then
+    // writes would replace the user's whole ~/.codex/config.toml \u2014 trust
+    // levels, hook trust hashes and MCP servers \u2014 with `{}`.
+    expect(usesJsonConfig('codex')).toBe(false);
+  });
+
+  it.each(['claude', 'cursor', 'windsurf', 'cline', 'copilot', 'gemini', 'opencode'])(
+    'treats %s as a JSON-config client',
+    (tool) => {
+      expect(usesJsonConfig(tool as Parameters<typeof usesJsonConfig>[0])).toBe(true);
+    }
+  );
 });

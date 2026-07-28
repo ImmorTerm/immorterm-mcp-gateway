@@ -80,10 +80,10 @@ export function getDefaultConfigPath(tool: AiToolId): string | null {
       return path.join(home, '.copilot', 'mcp-config.json');
 
     case 'codex':
-      // Codex CLI uses TOML (~/.codex/config.toml) for the [mcp_servers]
-      // table. Per per-vendor format-adapter rule \u2014 the gateway's TOML
-      // rewriter wraps the JSON->TOML transformation; we still return the
-      // canonical path so registration + watch logic can find it.
+      // Codex CLI keeps its [mcp_servers] table in TOML at
+      // ~/.codex/config.toml. Returned so detection can report Codex as
+      // installed \u2014 but this file is NOT gateway-rewritable, see
+      // `usesJsonConfig` below.
       return path.join(home, '.codex', 'config.toml');
 
     case 'gemini':
@@ -145,6 +145,27 @@ export function initClients(
 
 function gatewayUrl(serverName: string): string {
   return `http://localhost:${port}/${serverName}/mcp`;
+}
+
+/**
+ * Whether the gateway may read/rewrite this client's config as JSON.
+ *
+ * Every client here stores MCP servers in a JSON document except Codex, which
+ * uses TOML. That distinction is load-bearing, not cosmetic: `readConfig`
+ * swallows a parse failure and returns `{}`, so treating a TOML file as JSON
+ * yields an empty config — and any code path that then calls `writeConfig`
+ * would replace the user's entire `~/.codex/config.toml` (trust levels, hook
+ * trust hashes, MCP servers) with `{}`. Today that is unreachable only by
+ * accident, because an empty parse also means nothing gets backed up and the
+ * write is skipped. This makes the invariant explicit instead.
+ *
+ * Codex is also a poor fit for gateway proxying on its own merits: its MCP
+ * config is user-global, so an HTTP gateway URL cannot carry a project scope,
+ * and the gateway cannot see the client's cwd to infer one. ImmorTerm registers
+ * Codex's servers directly via `codex mcp add` instead.
+ */
+export function usesJsonConfig(tool: AiToolId): boolean {
+  return tool !== 'codex';
 }
 
 function readConfig(configPath: string): Record<string, unknown> {
@@ -221,6 +242,10 @@ function rewriteClientConfig(
   tool: string,
   configPath: string,
 ): { name: string; config: StdioServerConfig }[] {
+  if (!usesJsonConfig(tool as AiToolId)) {
+    logger.debug(`[clients] ${tool} keeps a non-JSON config; not gateway-rewritable`);
+    return [];
+  }
   const config = readConfig(configPath);
   const servers = (config.mcpServers ?? {}) as Record<string, ServerConfig>;
 
@@ -276,6 +301,7 @@ function rewriteClientConfig(
  * Restore a client's original config from backup.
  */
 export function restoreClient(tool: string): boolean {
+  if (!usesJsonConfig(tool as AiToolId)) return false;
   const client = registeredClients.get(tool);
   const backup = readClientBackup(tool);
 
@@ -470,6 +496,7 @@ function handleClientConfigChange(
  * Check a client's config for orphaned gateway URLs (crash recovery).
  */
 export function recoverClient(tool: AiToolId, configPath?: string): boolean {
+  if (!usesJsonConfig(tool)) return false;
   const resolvedPath = configPath ?? getDefaultConfigPath(tool);
   if (!resolvedPath || !fs.existsSync(resolvedPath)) return false;
 
