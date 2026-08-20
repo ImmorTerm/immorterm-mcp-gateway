@@ -16,6 +16,86 @@ let logger: Logger = {
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * Absolute path to a usable `npx`, or null.
+ *
+ * WHY THIS EXISTS: every npx call here used to be a bare `execFileSync('npx',…)`
+ * relying on PATH. A GUI-launched gateway does not inherit a login shell's PATH,
+ * and version managers frequently shim `node` without shimming `npx` — on the
+ * machine this was found, `node` resolved via a proto shim while `npx` existed
+ * only in /opt/homebrew/bin. Every resolution attempt then threw, the last
+ * fallback returned the literal string "npx", and the spawn failed with
+ * "Child <name> is not alive" — a gateway-wide 502 for EVERY npx-based server,
+ * on both Claude Code and Codex.
+ *
+ * The load-bearing candidate is `dirname(process.execPath)`: npm and npx ship
+ * beside the node binary under nvm, volta, asdf, proto, Homebrew and system
+ * installs alike, so deriving from the node actually running us is portable in
+ * a way that a hard-coded list never is. The rest are ordinary fallbacks.
+ */
+let npxPathCache: string | null | undefined;
+export function findNpx(): string | null {
+  if (npxPathCache !== undefined) return npxPathCache;
+
+  const candidates: string[] = [];
+
+  // 1. Beside the node running this process — covers every version manager.
+  candidates.push(path.join(path.dirname(process.execPath), 'npx'));
+
+  // 2. Whatever PATH says, if PATH happens to be populated.
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (dir) candidates.push(path.join(dir, 'npx'));
+  }
+
+  // 3. Common install roots, for a GUI process with a threadbare PATH.
+  const home = process.env.HOME ?? '';
+  candidates.push(
+    '/opt/homebrew/bin/npx',
+    '/usr/local/bin/npx',
+    '/usr/bin/npx',
+    path.join(home, '.proto/shims/npx'),
+    path.join(home, '.volta/bin/npx'),
+    path.join(home, '.local/bin/npx'),
+  );
+
+  for (const c of candidates) {
+    try {
+      fs.accessSync(c, fs.constants.X_OK);
+      logger.debug(`[npx-resolver] using npx at ${c}`);
+      npxPathCache = c;
+      return c;
+    } catch {
+      // next
+    }
+  }
+
+  logger.warn(
+    '[npx-resolver] no usable `npx` found. Every npx-based MCP server will fail ' +
+    'to spawn ("Child … is not alive"). Install Node.js, or point the gateway at ' +
+    'one by adding its bin directory to PATH.'
+  );
+  npxPathCache = null;
+  return null;
+}
+
+/**
+ * PATH for spawned children, guaranteed to contain node/npx.
+ *
+ * A child resolved to a real binary can still fail if IT shells out to node and
+ * the inherited PATH lacks it — the same threadbare-PATH problem one level down.
+ */
+export function childPath(): string {
+  const parts = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  const nodeDir = path.dirname(process.execPath);
+  if (!parts.includes(nodeDir)) parts.unshift(nodeDir);
+  const npx = findNpx();
+  if (npx) {
+    const npxDir = path.dirname(npx);
+    if (!parts.includes(npxDir)) parts.unshift(npxDir);
+  }
+  return parts.join(path.delimiter);
+}
+
+/**
  * Initialize the resolver, loading any cached paths.
  */
 export function initNpxResolver(stateDir: string, log?: Logger): void {
@@ -123,18 +203,20 @@ function resolveNpx(config: StdioServerConfig, key: string): ResolvedCommand {
 
   try {
     // Use npx to resolve the path — runs `which` inside the npx environment
-    const resolvedPath = execFileSync('npx', ['-y', packageArg, '--version'], {
+    const npxBin = findNpx();
+    if (!npxBin) throw new Error('npx not found');
+    const resolvedPath = execFileSync(npxBin, ['-y', packageArg, '--version'], {
       encoding: 'utf-8',
       timeout: 60_000,
-      env: { ...process.env, ...config.env },
+      env: { ...process.env, PATH: childPath(), ...config.env },
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
 
     // That gave us the version, not the path. Try `which` approach.
-    const whichResult = execFileSync('npx', ['which', cleanPackage], {
+    const whichResult = execFileSync(npxBin, ['which', cleanPackage], {
       encoding: 'utf-8',
       timeout: 30_000,
-      env: { ...process.env, ...config.env },
+      env: { ...process.env, PATH: childPath(), ...config.env },
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
 
@@ -158,9 +240,11 @@ function resolveNpx(config: StdioServerConfig, key: string): ResolvedCommand {
 
   // Last resort: ensure installed then use full npx (still saves on subsequent calls)
   try {
-    execFileSync('npx', ['-y', packageArg, '--help'], {
+    const npxBin2 = findNpx();
+    if (!npxBin2) throw new Error('npx not found');
+    execFileSync(npxBin2, ['-y', packageArg, '--help'], {
       timeout: 60_000,
-      env: { ...process.env, ...config.env },
+      env: { ...process.env, PATH: childPath(), ...config.env },
       stdio: 'pipe',
     });
   } catch {

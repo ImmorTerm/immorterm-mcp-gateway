@@ -8,7 +8,7 @@ import {
   Logger,
 } from './types';
 import { isStateful, getClassification } from './classification';
-import { resolveCommand } from './npx-resolver';
+import { resolveCommand, childPath } from './npx-resolver';
 
 /** Pool of stateless (shared) children: serverName → ManagedChild */
 const sharedPool = new Map<string, ManagedChild>();
@@ -233,7 +233,11 @@ async function spawnChild(serverName: string, sessionId: string | null): Promise
 
   const child = spawn(resolved.command, resolved.args, {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, ...resolved.env },
+    // PATH is overridden rather than inherited: a GUI-launched gateway gets a
+    // threadbare PATH, and a child that shells out to node/npx then fails the
+    // same way the resolver did. childPath() guarantees node's own directory is
+    // present. `resolved.env` still wins, so a server can override it.
+    env: { ...process.env, PATH: childPath(), ...resolved.env },
     // Don't detach — children should die with the gateway
   });
 
